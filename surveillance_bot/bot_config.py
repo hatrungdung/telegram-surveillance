@@ -38,8 +38,11 @@ class BotConfig:
     TIMESTAMP = 'timestamp'
     OD_VIDEO_DURATION = 'od_video_duration'
     SRV_VIDEO_DURATION = 'srv_video_duration'
+    SRV_AUDIO_DURATION = 'srv_audio_duration'
     SRV_PICTURE_INTERVAL = 'srv_picture_interval'
     SRV_MOTION_CONTOURS = 'srv_motion_contours'
+    SRV_VIDEO_THRESHOLD = 'srv_video_threshold'
+    SRV_AUDIO_THRESHOLD = 'srv_audio_threshold'
 
     # State definitions for top level conversation
     MAIN_MENU, GENERAL_CONFIG, SURVEILLANCE_CONFIG = map(chr, range(3))
@@ -49,18 +52,21 @@ class BotConfig:
         CHANGE_TIMESTAMP,
         CHANGE_OD_VIDEO_DURATION,
         CHANGE_SRV_VIDEO_DURATION,
+        CHANGE_SRV_AUDIO_DURATION,
         CHANGE_SRV_PICTURE_INTERVAL,
-        CHANGE_SRV_MOTION_CONTOURS
-    ) = map(chr, range(3, 8))
+        CHANGE_SRV_MOTION_CONTOURS,
+        CHANGE_SRV_VIDEO_THRESHOLD,
+        CHANGE_SRV_AUDIO_THRESHOLD
+    ) = map(chr, range(3, 11))
 
     # State definitions for input conversation
-    BOOLEAN_INPUT, INTEGER_INPUT = map(chr, range(8, 10))
+    BOOLEAN_INPUT, INTEGER_INPUT, FLOAT_INPUT = map(chr, range(11, 14))
 
     # Shortcut for ConversationHandler.END
     END = ConversationHandler.END
 
     # Auxiliary constants
-    CURRENT_VARIABLE, RETURN_HANDLER, ENABLE, DISABLE = map(chr, range(10, 14))
+    CURRENT_VARIABLE, RETURN_HANDLER, ENABLE, DISABLE = map(chr, range(14, 18))
 
     @staticmethod
     def get_config_handler(bot: 'Bot') -> ConversationHandler:
@@ -116,6 +122,12 @@ class BotConfig:
                         + '$'
                     ),
                     CallbackQueryHandler(
+                        BotConfig._change_srv_audio_duration,
+                        pattern='^'
+                        + str(BotConfig.CHANGE_SRV_AUDIO_DURATION)
+                        + '$'
+                    ),
+                    CallbackQueryHandler(
                         BotConfig._change_srv_picture_interval,
                         pattern='^'
                         + str(BotConfig.CHANGE_SRV_PICTURE_INTERVAL)
@@ -125,6 +137,18 @@ class BotConfig:
                         BotConfig._change_motion_contours,
                         pattern='^'
                         + str(BotConfig.CHANGE_SRV_MOTION_CONTOURS)
+                        + '$'
+                    ),
+                    CallbackQueryHandler(
+                        BotConfig._change_srv_video_threshold,
+                        pattern='^'
+                        + str(BotConfig.CHANGE_SRV_VIDEO_THRESHOLD)
+                        + '$'
+                    ),
+                    CallbackQueryHandler(
+                        BotConfig._change_srv_audio_threshold,
+                        pattern='^'
+                        + str(BotConfig.CHANGE_SRV_AUDIO_THRESHOLD)
                         + '$'
                     ),
                     CallbackQueryHandler(
@@ -146,6 +170,12 @@ class BotConfig:
                     MessageHandler(
                         Filters.text,
                         BotConfig._integer_input
+                    )
+                ],
+                BotConfig.FLOAT_INPUT: [
+                    MessageHandler(
+                        Filters.text,
+                        BotConfig._float_input
                     )
                 ]
             },
@@ -171,11 +201,20 @@ class BotConfig:
         if BotConfig.SRV_VIDEO_DURATION not in context.bot_data:
             context.bot_data[BotConfig.SRV_VIDEO_DURATION] = 30
 
+        if BotConfig.SRV_AUDIO_DURATION not in context.bot_data:
+            context.bot_data[BotConfig.SRV_AUDIO_DURATION] = 5
+
         if BotConfig.SRV_PICTURE_INTERVAL not in context.bot_data:
             context.bot_data[BotConfig.SRV_PICTURE_INTERVAL] = 5
 
         if BotConfig.SRV_MOTION_CONTOURS not in context.bot_data:
             context.bot_data[BotConfig.SRV_MOTION_CONTOURS] = True
+
+        if BotConfig.SRV_VIDEO_THRESHOLD not in context.bot_data:
+            context.bot_data[BotConfig.SRV_VIDEO_THRESHOLD] = 5
+
+        if BotConfig.SRV_AUDIO_THRESHOLD not in context.bot_data:
+            context.bot_data[BotConfig.SRV_AUDIO_THRESHOLD] = 0.1
 
     # Menus
 
@@ -284,8 +323,11 @@ class BotConfig:
             The state SURVEILLANCE_CONFIG.
         """
         video_duration = context.bot_data[BotConfig.SRV_VIDEO_DURATION]
+        audio_duration = context.bot_data[BotConfig.SRV_AUDIO_DURATION]
         picture_interval = context.bot_data[BotConfig.SRV_PICTURE_INTERVAL]
         motion_contours = context.bot_data[BotConfig.SRV_MOTION_CONTOURS]
+        video_threshold = context.bot_data[BotConfig.SRV_VIDEO_THRESHOLD]
+        audio_threshold = context.bot_data[BotConfig.SRV_AUDIO_THRESHOLD]
 
         motion_contours_str = 'Enabled' if motion_contours else 'Disabled'
 
@@ -293,8 +335,13 @@ class BotConfig:
                f"\n" \
                f"__Video duration__:\n" \
                f" |- _Description_: Duration of the video taken when motion " \
-               f"is detected|.\n" \
+               f"or sound is detected|.\n" \
                f" |- _Current value_: *{video_duration} seconds*\n" \
+               f"\n" \
+               f"__Audio duration__:\n" \
+               f" |- _Description_: Duration of the audio recorded when motion " \
+               f"or sound is detected|.\n" \
+               f" |- _Current value_: *{audio_duration} seconds*\n" \
                f"\n" \
                f"__Picture Interval__:\n" \
                f" |- _Description_: Interval between photos taken after " \
@@ -305,11 +352,23 @@ class BotConfig:
                f" |- _Description_: Draws a rectangle around the objects in " \
                f"motion|.\n" \
                f" |- _Current value_: *{motion_contours_str}*" \
+               f"\n" \
+               f"__Video threshold__:\n" \
+               f" |- _Description_: Sensitivity of motion detection|.\n" \
+               f" |- _Current value_: *{video_threshold}*\n" \
+               f"\n" \
+               f"__Audio threshold__:\n" \
+               f" |- _Description_: Sensitivity of sound detection|.\n" \
+               f" |- _Current value_: *{str(audio_threshold).replace('.', '|.')}*\n" \
                f"".replace('|', '\\')
         buttons = [
             [InlineKeyboardButton(
                 text='Video duration',
                 callback_data=str(BotConfig.CHANGE_SRV_VIDEO_DURATION)
+            )],
+            [InlineKeyboardButton(
+                text='Audio duration',
+                callback_data=str(BotConfig.CHANGE_SRV_AUDIO_DURATION)
             )],
             [InlineKeyboardButton(
                 text='Picture Interval',
@@ -318,6 +377,14 @@ class BotConfig:
             [InlineKeyboardButton(
                 text='Draw motion contours',
                 callback_data=str(BotConfig.CHANGE_SRV_MOTION_CONTOURS)
+            )],
+            [InlineKeyboardButton(
+                text='Video threshold',
+                callback_data=str(BotConfig.CHANGE_SRV_VIDEO_THRESHOLD)
+            )],
+            [InlineKeyboardButton(
+                text='Audio threshold',
+                callback_data=str(BotConfig.CHANGE_SRV_AUDIO_THRESHOLD)
             )],
             [InlineKeyboardButton(
                 text='Back',
@@ -463,6 +530,38 @@ class BotConfig:
         )
 
     @staticmethod
+    def _change_srv_audio_duration(
+            update: Update,
+            context: CallbackContext
+    ) -> str:
+        """
+        Prepares all required data to request the SRV_AUDIO_DURATION
+        configuration to the user.
+
+        Args:
+            update: The update to be handled.
+            context: The context object for the update.
+
+        Returns:
+            The state INTEGER_INPUT through `_integer_question` method.
+        """
+        audio_duration = context.bot_data[BotConfig.SRV_AUDIO_DURATION]
+
+        text = f'*Surveillance audio duration*\n' \
+               f'\n' \
+               f'Current value: *{audio_duration}*\n' \
+               f'\n' \
+               f'Type value for video duration:'
+
+        return BotConfig._integer_question(
+            update,
+            context,
+            text,
+            BotConfig.SRV_AUDIO_DURATION,
+            BotConfig._surveillance_config
+        )
+
+    @staticmethod
     def _change_srv_picture_interval(
             update: Update,
             context: CallbackContext
@@ -525,6 +624,70 @@ class BotConfig:
             context,
             text,
             BotConfig.SRV_MOTION_CONTOURS,
+            BotConfig._surveillance_config
+        )
+
+    @staticmethod
+    def _change_srv_video_threshold(
+            update: Update,
+            context: CallbackContext
+    ) -> str:
+        """
+        Prepares all required data to request the SRV_VIDEO_THRESHOLD
+        configuration to the user.
+
+        Args:
+            update: The update to be handled.
+            context: The context object for the update.
+
+        Returns:
+            The state INTEGER_INPUT through `_integer_question` method.
+        """
+        video_threshold = context.bot_data[BotConfig.SRV_VIDEO_THRESHOLD]
+
+        text = f'*Video threshold*\n' \
+               f'\n' \
+               f'Current value: *{video_threshold}*\n' \
+               f'\n' \
+               f'Type value for video threshold \\(e\\.g\\., 5\\):'
+
+        return BotConfig._integer_question(
+            update,
+            context,
+            text,
+            BotConfig.SRV_VIDEO_THRESHOLD,
+            BotConfig._surveillance_config
+        )
+
+    @staticmethod
+    def _change_srv_audio_threshold(
+            update: Update,
+            context: CallbackContext
+    ) -> str:
+        """
+        Prepares all required data to request the SRV_AUDIO_THRESHOLD
+        configuration to the user.
+
+        Args:
+            update: The update to be handled.
+            context: The context object for the update.
+
+        Returns:
+            The state FLOAT_INPUT through `_float_question` method.
+        """
+        audio_threshold = context.bot_data[BotConfig.SRV_AUDIO_THRESHOLD]
+
+        text = '*Audio threshold*\n' \
+               '\n' \
+               'Current value: *' + str(audio_threshold).replace(".", "\\.") + '*\n' \
+               '\n' \
+               'Type value for audio threshold \\(e\\.g\\., 0\\.1\\):'
+
+        return BotConfig._float_question(
+            update,
+            context,
+            text,
+            BotConfig.SRV_AUDIO_THRESHOLD,
             BotConfig._surveillance_config
         )
 
@@ -607,6 +770,38 @@ class BotConfig:
 
         return BotConfig.INTEGER_INPUT
 
+    @staticmethod
+    def _float_question(
+            update: Update,
+            context: CallbackContext,
+            text: str,
+            current_variable: str,
+            return_handler: Callable[[Update, CallbackContext], str]
+    ) -> str:
+        """
+        Builds a floating point question to send it to the user using received data.
+
+        Args:
+            update: The update to be handled.
+            context: The context object for the update.
+            text: Message to be shown to the users.
+            current_variable: Variable to be set.
+            return_handler: Handler to be called with the user response.
+
+        Returns:
+            The state FLOAT_INPUT.
+        """
+        context.user_data[BotConfig.CURRENT_VARIABLE] = current_variable
+        context.user_data[BotConfig.RETURN_HANDLER] = return_handler
+
+        update.callback_query.answer()
+        update.callback_query.edit_message_text(
+            text=text,
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
+
+        return BotConfig.FLOAT_INPUT
+
     # Input handlers.
 
     @staticmethod
@@ -644,13 +839,41 @@ class BotConfig:
         """
         try:
             value = int(update.message.text)
-            if value < 1 or value > 99:
-                raise ValueError
-        except ValueError:
+            assert value > 0
+            assert value < 100
+        except (ValueError, AssertionError):
             update.message.reply_text(
                 text='Invalid value, insert an integer number between 1 and 99'
             )
             return BotConfig.INTEGER_INPUT
+
+        context.bot_data[
+            context.user_data[BotConfig.CURRENT_VARIABLE]
+        ] = value
+
+        return context.user_data[BotConfig.RETURN_HANDLER](update, context)
+
+    @staticmethod
+    def _float_input(update: Update, context: CallbackContext) -> str:
+        """
+        Receive a floatng point input from the user, validates it, and saves the
+        value into corresponding variable.
+
+        Args:
+            update: The update to be handled.
+            context: The context object for the update.
+
+        Returns:
+            The execution of the previously stored handler or the state
+                FLOAT_INPUT in case of validation error.
+        """
+        try:
+            value = float(update.message.text)
+        except (ValueError, AssertionError):
+            update.message.reply_text(
+                text='Invalid value, insert a floating point number'
+            )
+            return BotConfig.FLOAT_INPUT
 
         context.bot_data[
             context.user_data[BotConfig.CURRENT_VARIABLE]

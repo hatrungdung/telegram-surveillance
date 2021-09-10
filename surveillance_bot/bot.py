@@ -4,6 +4,7 @@ Module for bot related functionality.
 This module implements the `Bot` class that manage the communication between
 the user (through a telegram chat) and the camera.
 """
+import asyncio
 import inspect
 import logging
 import os
@@ -219,7 +220,8 @@ class Bot:
         custom_keyboard = [
             [
                 '/get_photo',
-                '/get_video'
+                '/get_video',
+                '/get_audio'
             ],
             [
                 '/surveillance_{}'.format('stop' if active else 'start')
@@ -255,6 +257,7 @@ class Bot:
                  "*On Demand commands*\n"
                  "/get|_photo |- Takes a picture from the cam\n"
                  "/get|_video |- Takes a video from the cam\n"
+                 "/get|_audio |- Records audio from the microphone\n"
                  "\n"
                  "*Surveillance Mode commands*\n"
                  "/surveillance|_start |- Starts surveillance mode\n"
@@ -344,6 +347,52 @@ class Bot:
             message_id=message.message_id
         )
 
+    def _command_get_audio(
+            self,
+            update: Update,
+            context: CallbackContext
+    ) -> None:
+        """
+        Handler for `/get_audio` command.
+
+        It records the audio and sends it to the user.
+
+        Args:
+            update: The update to be handled.
+            context: The context object for the update.
+        """
+        # Retrieves configuration
+        seconds = context.bot_data[BotConfig.OD_VIDEO_DURATION]
+
+        # Sends waiting message
+        message = update.message.reply_text(
+            text=f'Recording a {seconds} seconds audio...'
+        )
+
+        # Records video
+        context.bot.send_chat_action(
+            chat_id=update.message.chat_id,
+            action=ChatAction.RECORD_AUDIO
+        )
+        audio = asyncio.run(self.camera.get_audio(seconds=seconds))
+
+        # Uploads audio
+        context.bot.send_chat_action(
+            chat_id=update.message.chat_id,
+            action=ChatAction.UPLOAD_AUDIO
+        )
+        context.bot.send_audio(
+            chat_id=update.message.chat_id,
+            title='audio.mp3',
+            audio=audio
+        )
+
+        # Deletes waiting message
+        context.bot.delete_message(
+            chat_id=update.message.chat_id,
+            message_id=message.message_id
+        )
+
     def _async_command_surveillance_start(
             self,
             update: Update,
@@ -373,8 +422,11 @@ class Bot:
         # Retrieve configuration
         timestamp = context.bot_data[BotConfig.TIMESTAMP]
         video_seconds = context.bot_data[BotConfig.SRV_VIDEO_DURATION]
+        audio_seconds = context.bot_data[BotConfig.SRV_AUDIO_DURATION]
         picture_interval = context.bot_data[BotConfig.SRV_PICTURE_INTERVAL]
         motion_contours = context.bot_data[BotConfig.SRV_MOTION_CONTOURS]
+        video_threshold = context.bot_data[BotConfig.SRV_VIDEO_THRESHOLD]
+        audio_threshold = context.bot_data[BotConfig.SRV_AUDIO_THRESHOLD]
 
         # Starts surveillance
         waiting_message = None
@@ -387,15 +439,19 @@ class Bot:
                 timestamp=timestamp,
                 video_seconds=video_seconds,
                 picture_seconds=picture_interval,
-                contours=motion_contours
+                audio_seconds=audio_seconds,
+                contours=motion_contours,
+                video_threshold=video_threshold,
+                audio_threshold=audio_threshold
         ):
             if 'detected' in data:
                 update.message.reply_text(
-                    text='*MOTION DETECTED|!*'.replace('|', '\\'),
+                    text='*SOUND OR MOTION DETECTED|!*'.replace('|', '\\'),
                     parse_mode=ParseMode.MARKDOWN_V2
                 )
                 waiting_message = update.message.reply_text(
-                    text=f'Recording a {video_seconds} seconds video and '
+                    text=f'Recording a {video_seconds} seconds video, '
+                         f'a {audio_seconds} seconds audio and '
                          f'taking {video_seconds // picture_interval} '
                          f'photos...'
                 )
@@ -425,6 +481,22 @@ class Bot:
                 context.bot.send_video(
                     chat_id=update.message.chat_id,
                     video=data['video']
+                )
+                if waiting_message:
+                    context.bot.delete_message(
+                        chat_id=update.message.chat_id,
+                        message_id=waiting_message.message_id
+                    )
+                    waiting_message = None
+            if 'audio' in data:
+                context.bot.send_chat_action(
+                    chat_id=update.message.chat_id,
+                    action=ChatAction.UPLOAD_AUDIO
+                )
+                context.bot.send_audio(
+                    chat_id=update.message.chat_id,
+                    title="audio.mp3",
+                    audio=data['audio']
                 )
                 if waiting_message:
                     context.bot.delete_message(

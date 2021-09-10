@@ -22,3 +22,8 @@ dist
 
 # Pyenv
 .python-version
+
+.vscode
+openh264-1.8.0-win64.dll
+Pipfile.lock
+Pipfile

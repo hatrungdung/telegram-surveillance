@@ -16,6 +16,9 @@ from typing import IO, Any, Dict, Iterator, List, Optional, Tuple
 import cv2
 import numpy as np
 
+import sounddevice as sd
+from pydub import AudioSegment
+
 
 # Exceptions
 class CameraError(Exception):
@@ -150,6 +153,8 @@ class Camera:
 
     Args:
         cam_id: ID of the video capturing device to open.
+        video_threshold: sensitivity of motion detection.
+        audio_threshold: sensitivity of audio detection.
     """
 
     STATE_IDLE = 'idle'
@@ -157,6 +162,8 @@ class Camera:
 
     STATE_MOTION_DETECTED = 'motion_detected'
     """After motion have been detected."""
+
+    SAMPLE_RATE = 44100
 
     def __init__(self, cam_id=0) -> None:
         self._camera = CameraDevice(cam_id)
@@ -213,7 +220,8 @@ class Camera:
     @staticmethod
     def _get_motion_contours(
             frame_1: np.ndarray,
-            frame_2: np.ndarray
+            frame_2: np.ndarray,
+            video_threshold: int,
     ) -> List[np.ndarray]:
         """
         Detects motion and find the contours for every motion detected.
@@ -224,12 +232,13 @@ class Camera:
         Args:
             frame_1: First of the two consecutive frames.
             frame_2: Second of the two consecutive frames.
+            video_threshold: Sensitivity of camera.
 
         Returns:
             A list with the contours found.
         """
         frame_delta = cv2.absdiff(frame_1, frame_2)
-        thresh = cv2.threshold(frame_delta, 5, 255, cv2.THRESH_BINARY)[1]
+        thresh = cv2.threshold(frame_delta, video_threshold, 255, cv2.THRESH_BINARY)[1]  # 5
 
         kernel = np.ones((40, 40), np.uint8)
         thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
@@ -254,10 +263,89 @@ class Camera:
         (x, y, width, height) = cv2.boundingRect(contour)
         cv2.rectangle(frame, (x, y), (x + width, y + height), (0, 255, 0), 1)
 
+    @staticmethod
+    def _record_buffer(buffer, **kwargs):
+        """Record from microphone to buffer
+
+        Args:
+            buffer (bytes): A bytes buffer to record to.
+
+        Raises:
+            sd.CallbackStop: callback(indata, frame_count, time_info, status).
+
+        Returns:
+            stream (sounddevice.InputStream): Stream as a file type object.
+            event (Event): event.is_set() will be True once audio has finished recording.
+        """
+        class Event:
+            """Class to mark an event.
+            """
+            _set = False
+
+            def set(self):
+                """Signals event completion.
+                """
+                self._set = True
+
+            def is_set(self):
+                """Test whether event has completed.
+
+                Returns:
+                    Boolean: True if event has completed.
+                """
+                return self._set
+
+        event = Event()
+        idx = 0
+
+        def callback(indata, frame_count, time_info, status):  # pylint: disable=unused-argument
+            nonlocal idx
+            remainder = len(buffer) - idx
+            if remainder == 0:
+                event.set()
+                raise sd.CallbackStop
+            indata = indata[:remainder]
+            buffer[idx:idx + len(indata)] = indata
+            idx += len(indata)
+
+        stream = sd.InputStream(callback=callback,
+                                dtype=buffer.dtype,
+                                channels=buffer.shape[1],
+                                **kwargs)
+        return stream, event
+
+    async def get_audio(self, seconds=5):
+        """Records an audio from the microphone as an MP3.
+
+        Args:
+            seconds (int, optional): Number of seconds to record. Defaults to 5.
+
+        Returns:
+            bytes: MP3.
+        """
+        buffer = np.empty((int(seconds * self.SAMPLE_RATE), 1),
+                          dtype=np.int32)
+        stream, event = self._record_buffer(buffer,
+                                            samplerate=self.SAMPLE_RATE)
+        with stream:
+            while not event.is_set():
+                sd.sleep(10)
+        with BytesIO(buffer) as wav:
+            sound = AudioSegment.from_raw(wav,
+                                          frame_rate=self.SAMPLE_RATE,
+                                          channels=buffer.shape[1],
+                                          sample_width=buffer.itemsize)
+        audio = BytesIO()
+        sound.export(audio, format='mp3')
+        return audio
+
     def _motion_detection(
             self,
             timestamp=True,
-            contours=True
+            contours=True,
+            audio_seconds=5,
+            video_threshold=5,
+            audio_threshold=0.1
     ) -> Iterator[Tuple[bool, int, np.ndarray]]:
         """
         Executes motion detection operation during surveillance mode.
@@ -269,6 +357,9 @@ class Camera:
         Args:
             timestamp: Adds time stamping on the frames.
             contours: Draws motion contours on the frames.
+            audio_seconds: Duration of audio for monitoring.
+            video_threshold: Sensitivity of camera.
+            audio_threshold: Sensitivity of microphone.
 
         Yields:
             A tuple with three values.
@@ -279,6 +370,8 @@ class Camera:
         self._surveillance_mode = True
         previous_frame = None
         last_frame_id = 0
+        last_buffer = None
+        event = None
 
         while self._surveillance_mode:
             frame_id, frame = self._camera.read(timestamp=timestamp)
@@ -293,7 +386,7 @@ class Camera:
                 previous_frame = gray
                 continue
 
-            motion_contours = self._get_motion_contours(previous_frame, gray)
+            motion_contours = self._get_motion_contours(previous_frame, gray, video_threshold)
 
             detected = False
             for contour in motion_contours:
@@ -303,15 +396,31 @@ class Camera:
                     self._draw_contours(frame, contour)
                 detected = True
 
+            if event is None:
+                buffer = np.empty((int(audio_seconds * self.SAMPLE_RATE), 1),
+                                  dtype=np.int32)
+                stream, event = self._record_buffer(
+                    buffer, samplerate=self.SAMPLE_RATE)
+                stream.__enter__()
+            elif event.is_set():
+                stream.__exit__()
+                event = None
+                if np.linalg.norm(buffer) > audio_threshold * pow(2, 31):
+                    detected = True
+                    last_buffer = buffer
+
             previous_frame = gray
-            yield detected, frame_id, frame
+            yield detected, frame_id, frame, last_buffer
 
     def surveillance_start(
             self,
             timestamp=True,
             video_seconds=30,
+            audio_seconds=5,
             picture_seconds=5,
-            contours=True
+            contours=True,
+            video_threshold=5,
+            audio_threshold=0.1
     ) -> Iterator[Dict[str, Any]]:
         """
         Starts surveillance mode, waiting for motion detection.
@@ -325,7 +434,10 @@ class Camera:
             timestamp: Adds time stamping on the frames.
             video_seconds: Video duration.
             picture_seconds: Time elapsed between pictures.
+            audio_seconds: Audio duration.
             contours: Draws motion contours on the frames.
+            video_threshold: Sensitivy of camera.
+            audio_threshold: Sensitivy of microphone.
 
         Yields:
             A dict with three possible configurations
@@ -339,10 +451,14 @@ class Camera:
         n_frames = 0
         path = ''
         video_writer: cv2.VideoWriter = cv2.VideoWriter()
+        exported_sound = False
 
-        for detected, frame_id, frame in self._motion_detection(
+        for detected, frame_id, frame, buffer in self._motion_detection(
                 timestamp=timestamp,
-                contours=contours
+                contours=contours,
+                audio_seconds=audio_seconds,
+                video_threshold=video_threshold,
+                audio_threshold=audio_threshold
         ):
             if status == Camera.STATE_IDLE:
                 if detected:
@@ -352,7 +468,20 @@ class Camera:
                     n_frames = fps * video_seconds
                     processed = [frame_id]
                     video_writer.write(frame)
+                    exported_sound = False
             if status == Camera.STATE_MOTION_DETECTED:
+                if buffer is not None and not exported_sound:
+                    with BytesIO(buffer) as wav:
+                        sound = AudioSegment.from_raw(
+                                wav,
+                                frame_rate=self.SAMPLE_RATE,
+                                channels=buffer.shape[1],
+                                sample_width=buffer.itemsize
+                        )
+                    audio = BytesIO()
+                    sound.export(audio, format='mp3')
+                    exported_sound = True
+                    yield {'audio': audio}
                 if not len(processed) % int(fps * picture_seconds):
                     yield {
                         'photo': BytesIO(cv2.imencode(".jpg", frame)[1]),
