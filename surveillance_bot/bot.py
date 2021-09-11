@@ -11,16 +11,22 @@ import os
 import sys
 from functools import wraps
 from typing import Any, Callable, Optional, Union
+from io import BytesIO
+
+import numpy as np
+import sounddevice as sd
+from pydub import AudioSegment
 
 from telegram import ChatAction, ParseMode, ReplyKeyboardMarkup, Update
 from telegram.ext import (
     CallbackContext,
     CommandHandler,
+    MessageHandler,
     Dispatcher,
     PicklePersistence,
-    Updater
+    Updater,
+    Filters
 )  # type: ignore
-
 from surveillance_bot.bot_config import BotConfig
 from surveillance_bot.camera import (
     Camera,
@@ -108,6 +114,9 @@ class Bot:
         # Register error handler
         dispatcher.add_error_handler(self._error)
 
+        # Register audio message handler
+        dispatcher.add_handler(MessageHandler(Filters.voice & ~Filters.command, self.voice_handler))
+
     def command_handler(
             self,
             command: str,
@@ -147,6 +156,18 @@ class Bot:
             return callback(update, context)
 
         return CommandHandler(command, wrapped, **kwargs)
+
+    def voice_handler(self, update, context):  # pylint: disable=unused-argument
+        """Play recieved voice message on speakers.
+        """
+        file_id = update.message.voice.file_id
+        file = self.updater.bot.get_file(file_id)
+        buffer = file.download_as_bytearray()
+        sound = AudioSegment.from_ogg(BytesIO(buffer))
+        audio = BytesIO()
+        sound.export(audio, format='wav')
+        data = np.frombuffer(audio.read(), dtype="int32")
+        sd.play(data)
 
     def start(self) -> None:
         """
