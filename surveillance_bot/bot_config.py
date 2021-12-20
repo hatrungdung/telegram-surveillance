@@ -839,11 +839,11 @@ class BotConfig:
         """
         try:
             value = int(update.message.text)
-            assert value > 0
-            assert value < 100
+            assert value >= 0
+            assert value <= 255
         except (ValueError, AssertionError):
             update.message.reply_text(
-                text='Invalid value, insert an integer number between 1 and 99'
+                text='Invalid value, insert an integer number between 0 and 255'
             )
             return BotConfig.INTEGER_INPUT
 

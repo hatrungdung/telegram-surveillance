@@ -27,3 +27,5 @@ dist
 openh264-1.8.0-win64.dll
 Pipfile.lock
 Pipfile
+pyproject.toml
+.env

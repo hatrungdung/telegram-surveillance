@@ -339,7 +339,7 @@ class Camera:
         sound.export(audio, format='mp3')
         return audio
 
-    def _motion_detection(
+    def _motion_detection(  # pylint: disable=too-many-arguments, too-many-locals
             self,
             timestamp=True,
             contours=True,
@@ -412,7 +412,7 @@ class Camera:
             previous_frame = gray
             yield detected, frame_id, frame, last_buffer
 
-    def surveillance_start(
+    def surveillance_start(  # pylint: disable=too-many-arguments, too-many-locals
             self,
             timestamp=True,
             video_seconds=30,

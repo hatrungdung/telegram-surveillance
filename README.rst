@@ -18,10 +18,11 @@ Surveillance Bot
     :target: https://github.com/pchinea/telegram-surveillance-bot/blob/master/LICENSE.txt
     :alt:  License
 
-Surveillance Bot is a Telegram bot that uses a camera (such a webcam) for
-surveillance. Photos and videos can be taken from the camera and sent via
-Telegram instantly. Those actions can be triggered by commands sent by the
-user or when motion is detected.
+Surveillance Bot is a Telegram bot that uses a camera (such a webcam) and a
+microphone for surveillance. Photos and videos can be taken from the camera,
+as well as audios from the microphone, and sent via Telegram instantly.
+Those actions can be triggered by commands sent by the user or when motion
+is detected.
 
 All files in this project are covered under the `GPLv3 LICENSE
 <http://www.gnu.org/licenses/gpl.html>`_, if you modify this project in any
@@ -33,8 +34,9 @@ Features
 
 - Motion detection.
 - Real time notification.
-- Motion tracking.
-- Photo and video capture on demand.
+- Motion tracking (based on configurable threshold).
+- Sound triggering (based on configurable threshold) and recording.
+- Photo, video and audio capture on demand.
 - Bot configuration via telegram chat.
 - Timestamp in photos and videos.
 - H264 video encoding (when codec is available).
@@ -45,6 +47,8 @@ Requirements
 ************
 - python (versions: 3.6, 3.7 and 3.8)
 - OpenCV
+- sounddevice
+- pydub
 - python-telegram-bot
 
 Quick-start
